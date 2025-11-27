@@ -1,0 +1,23 @@
+{
+    "name": "x3b-sf-to-heroku-service",
+    "version": "1.0.0",
+    "description": "Salesforce to Heroku Service",
+    "main": "index.js",
+    "type": "module",
+    "watch": {
+        "test": "{src,test}/*.js"
+    },
+    "scripts": {
+        "start": "node index.js"
+    },
+    "author": "3B Soft",
+    "license": "ISC",
+    "dependencies": {
+        "cors": "^2.8.5",
+        "dotenv": "^17.2.2",
+        "express": "^5.1.0"
+    },
+    "engines": {
+        "node": "20.18.x"
+    }
+}

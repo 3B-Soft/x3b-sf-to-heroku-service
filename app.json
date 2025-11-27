@@ -1,4 +1,0 @@
-{
-    "name": "SF to Heroku Service",
-    "addons": ["heroku-integration"]
-}
