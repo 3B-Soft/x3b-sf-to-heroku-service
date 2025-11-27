@@ -32,7 +32,7 @@ app.use(express.static(__dirname));
 app.route('/v1/file').get(async function (req, res) {
     const { contentVersionId, endpoint, sid } = req.query;
 
-    console.warn('POGETST file:', {
+    console.warn('GET file:', {
         endpoint,
         sid,
         contentVersionId
@@ -68,17 +68,18 @@ app.route('/v1/file').get(async function (req, res) {
  * Create salesforce file
  */
 app.route('/v1/file').post(async function (req, res) {
-    const { record, endpoint, sid } = req.body;
+    const { record, endpoint, sid, namespace } = req.body;
 
     console.warn('POST file:', {
         endpoint,
-        sid
+        sid,
+        namespace
     });
 
-    if (!sid || !endpoint || !record) {
+    if (!sid || !endpoint || !record || !namespace) {
         return res
             .status(400)
-            .json({ success: false, message: `Missing required parameters. Parameters required are sid, endpoint and record` });
+            .json({ success: false, message: `Missing required parameters. Parameters required are sid, endpoint, namespace and record` });
     }
 
     const sessionId = decrypt(sid)
@@ -89,7 +90,7 @@ app.route('/v1/file').post(async function (req, res) {
             .json({ success: false, message: `Invalid sessionId for call` });
     }
 
-    createFile({ record, endpoint, sessionId }).then(base64 => {
+    createFile({ record, endpoint, sessionId, namespace }).then(base64 => {
         return res.status(200).json({
             success: true,
             responseObject: base64
