@@ -3,6 +3,10 @@ import cors from "cors";
 import path from "path";
 
 import { fileURLToPath } from "url";
+import fetchFile from './services/fetchFile.js';
+import createFile from './services/createFile.js';
+import { decrypt } from './utils/decryption.js';
+
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -20,10 +24,82 @@ app.use(express.json({ limit: "50mb" }));
 // add access to directory
 app.use(express.static(__dirname));
 
-app.post("/v1/getFile", (req, res) => {
-    res.json({ status: "Success" });
+
+
+/**
+ * Get a Salesforce file using contentVersion
+ */
+app.route('/v1/file').get(async function (req, res) {
+    const { contentVersionId, endpoint, sid } = req.query;
+
+    console.warn('POGETST file:', {
+        endpoint,
+        sid,
+        contentVersionId
+    });
+
+    if (!sid || !endpoint || !contentVersionId) {
+        return res
+            .status(400)
+            .json({ success: false, message: `Missing required parameters. Parameters required are sid, endpoint and contentVersionId` });
+    }
+
+    const sessionId = decrypt(sid)
+
+    if (!sessionId) {
+        return res
+            .status(400)
+            .json({ success: false, message: `Invalid sessionId for call` });
+    }
+
+    fetchFile({ contentVersionId, endpoint, sessionId }).then(base64 => {
+        return res.status(200).json({
+            success: true,
+            responseObject: base64
+        });
+    }).catch(err => {
+        return res
+            .status(401)
+            .json({ success: false, message: err.message });
+    });
 });
 
+/**
+ * Create salesforce file
+ */
+app.route('/v1/file').post(async function (req, res) {
+    const { record, endpoint, sid } = req.body;
+
+    console.warn('POST file:', {
+        endpoint,
+        sid
+    });
+
+    if (!sid || !endpoint || !record) {
+        return res
+            .status(400)
+            .json({ success: false, message: `Missing required parameters. Parameters required are sid, endpoint and record` });
+    }
+
+    const sessionId = decrypt(sid)
+
+    if (!sessionId) {
+        return res
+            .status(400)
+            .json({ success: false, message: `Invalid sessionId for call` });
+    }
+
+    createFile({ record, endpoint, sessionId }).then(base64 => {
+        return res.status(200).json({
+            success: true,
+            responseObject: base64
+        });
+    }).catch(err => {
+        return res
+            .status(401)
+            .json({ success: false, message: err.message });
+    });
+});
 
 //Start the server
 const server = app.listen(process.env.PORT || port, function () {
