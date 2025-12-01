@@ -3,9 +3,8 @@ import cors from "cors";
 import path from "path";
 
 import { fileURLToPath } from "url";
-import fetchFile from './services/fetchFile.js';
-import createFile from './services/createFile.js';
-import { decrypt } from './utils/decryption.js';
+import { getFileWithSessionKey, getFileWithSessionId } from './services/getFile.js';
+import { saveFileWithSessionKey, saveFileWithSessionId } from './services/saveFile.js';
 
 
 const app = express();
@@ -31,81 +30,81 @@ app.route('/health').get(async function (req, res) {
         responseObject: null
     });
 });
+
 /**
  * Get a Salesforce file using contentVersion
  */
 app.route('/v1/file').get(async function (req, res) {
-    const { contentVersionId, endpoint, sid } = req.query;
-
-    console.warn('GET file:', {
-        endpoint,
-        sid,
-        contentVersionId
-    });
-
-    if (!sid || !endpoint || !contentVersionId) {
-        return res
-            .status(400)
-            .json({ success: false, message: `Missing required parameters. Parameters required are sid, endpoint and contentVersionId` });
+    const { contentVersionId, endpoint, sid, sessionKey } = req.query;
+    try {
+        if (!!contentVersionId && !!sessionKey) {
+            const base64 = await getFileWithSessionKey({ sessionKey, contentVersionId });
+            return res.status(200).json({
+                success: true,
+                responseObject: base64
+            });
+        } if (!!sid && !!endpoint && !!contentVersionId) {
+            const base64 = await getFileWithSessionId({ sid, endpoint, contentVersionId });
+            return res.status(200).json({
+                success: true,
+                responseObject: base64
+            });
+        } else {
+            throw new Error('Missing required parameters');
+        }
+    } catch (err) {
+        const errMessage = err?.response?.data?.error_description || err?.message;
+        return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
     }
-
-    const sessionId = decrypt(sid)
-
-    if (!sessionId) {
-        return res
-            .status(400)
-            .json({ success: false, message: `Invalid sessionId for call` });
-    }
-
-    fetchFile({ contentVersionId, endpoint, sessionId }).then(base64 => {
-        return res.status(200).json({
-            success: true,
-            responseObject: base64
-        });
-    }).catch(err => {
-        return res
-            .status(401)
-            .json({ success: false, message: err.message });
-    });
 });
 
 /**
- * Create salesforce file
+ * Create salesforce file synchronously
  */
 app.route('/v1/file').post(async function (req, res) {
-    const { record, endpoint, sid, namespace } = req.body;
+    const { namespace, record, endpoint, sid, sessionKey } = req.body;
+    try {
+        if (!namespace || !record || (!sid && !sessionKey)) {
+            throw new Error('Required parameters are missing');
+        }
 
-    console.warn('POST file:', {
-        endpoint,
-        sid,
-        namespace
-    });
-
-    if (!sid || !endpoint || !record || !namespace) {
-        return res
-            .status(400)
-            .json({ success: false, message: `Missing required parameters. Parameters required are sid, endpoint, namespace and record` });
+        if (!!sessionKey) {
+            const response = await saveFileWithSessionKey({ sessionKey, namespace, record });
+            return res.status(200).json({
+                success: true,
+                responseObject: response
+            });
+        } else {
+            const response = await saveFileWithSessionId({ sid, endpoint, namespace, record });
+            return res.status(200).json({
+                success: true,
+                responseObject: response
+            });
+        }
+    } catch (err) {
+        const errMessage = err?.response?.data?.error_description || err?.message;
+        return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
     }
-
-    const sessionId = decrypt(sid)
-
-    if (!sessionId) {
-        return res
-            .status(400)
-            .json({ success: false, message: `Invalid sessionId for call` });
-    }
-
-    createFile({ record, endpoint, sessionId, namespace }).then(base64 => {
-        return res.status(200).json({
-            success: true,
-            responseObject: base64
-        });
-    }).catch(err => {
-        return res
-            .status(401)
-            .json({ success: false, message: err.message });
-    });
 });
+
+app.route('/v1/file-async').post(async function (req, res) {
+    const { namespace, record, sessionKey } = req.body;
+    try {
+        if (!namespace || !record || !sessionKey) {
+            throw new Error('Required parameters are missing');
+        }
+
+        res.status(202).json({
+            success: true,
+            message: "File upload scheduled"
+        });
+
+        saveFileWithSessionKey({ sessionKey, namespace, record });
+    } catch (err) {
+        const errMessage = err?.response?.data?.error_description || err?.message;
+        return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
+    }
+})
 
 //Start the server
 const server = app.listen(process.env.PORT || port, function () {
