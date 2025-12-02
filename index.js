@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { getFileWithSessionKey, getFileWithSessionId } from './services/getFile.js';
-import { saveFileWithSessionKey } from './services/saveFile.js';
+import { saveFileWithSessionKey, saveFileWithSessionId } from './services/saveFile.js';
 
 
 const app = express();
@@ -24,8 +24,8 @@ app.route('/health').get(async function (req, res) {
  * Get a Salesforce file using contentVersion
  */
 app.route('/v1/file').get(async function (req, res) {
-    const { contentVersionId, endpoint, sid, sessionKey } = req.query;
     try {
+        const { contentVersionId, endpoint, sid, sessionKey } = req.query;
         if (!!contentVersionId && !!sessionKey) {
             const base64 = await getFileWithSessionKey({ sessionKey, contentVersionId });
             return res.status(200).json({
@@ -50,7 +50,7 @@ app.route('/v1/file').get(async function (req, res) {
 /**
  * Create salesforce file synchronously
  */
-app.route('/v1/file').post(express.raw({ type: "*/*", limit: "50mb" }), async function (req, res) {
+app.route('/v1/rawFile').post(express.raw({ type: "*/*", limit: "50mb" }), async function (req, res) {
     try {
         const firstPublishLocationId = req.headers["x-first-publish-location-id"];
         const contentDocumentId = req.headers['x-content-document-id'];
@@ -92,6 +92,33 @@ app.route('/v1/file').post(express.raw({ type: "*/*", limit: "50mb" }), async fu
         return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
     }
 });
+
+app.route('/v1/file').post(express.json({ limit: "50mb" }), async function (req, res) {
+    try {
+        const { namespace, record, endpoint, sid, sessionKey } = req.body;
+        if (!namespace || !record || (!sid && !sessionKey)) {
+            throw new Error('Required parameters are missing');
+        }
+
+        if (!!sessionKey) {
+            const response = await saveFileWithSessionKey({ sessionKey, namespace, record });
+            return res.status(200).json({
+                success: true,
+                responseObject: response
+            });
+        } else {
+            const response = await saveFileWithSessionId({ sid, endpoint, namespace, record });
+            return res.status(200).json({
+                success: true,
+                responseObject: response
+            });
+        }
+    } catch (err) {
+        const errMessage = err?.response?.data?.error_description || err?.message;
+        return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
+    }
+});
+
 
 
 //Start the server
