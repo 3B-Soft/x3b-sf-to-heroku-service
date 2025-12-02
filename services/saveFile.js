@@ -6,7 +6,9 @@ const API_VER = 'v62.0';
 
 export async function saveFileWithSessionKey({ sessionKey, namespace, record }) {
     console.info(`Save file with Session Key [${sessionKey} - ${namespace} - ${record?.Title}]`);
+    console.time('Authorization');
     const auth = await authorize({ sessionKey });
+    console.timeEnd('Authorization');
     return await saveFile({
         auth,
         namespace,

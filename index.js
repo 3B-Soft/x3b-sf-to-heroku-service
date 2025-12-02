@@ -26,6 +26,7 @@ app.post(
     '/v1/rawFile',
     express.raw({ type: "*/*", limit: "200mb" }),
     async (req, res) => {
+        console.time('TotalRequest');
         try {
             if (!req.headers["x-namespace"] || !req.headers["x-session-key"] || !req.headers["x-title"]) {
                 throw new Error('Missing required headers. Provide: x-namespace, x-session-key and x-title')
@@ -44,8 +45,12 @@ app.post(
             const firstPublishLocationId = req.headers["x-first-publish-location-id"];
             const contentDocumentId = req.headers['x-content-document-id'];
 
+            console.time('Base64Conversion');
+            const base64Data = req.body.toString('base64');
+            console.timeEnd('Base64Conversion');
+
             const record = {
-                VersionData: req.body.toString('base64'),
+                VersionData: base64Data,
                 Title: req.headers["x-title"] ?? "unknown_file_name",
                 PathOnClient: req.headers["x-title"] ?? "unknown_file_name",
                 ContentLocation: req.headers["x-content-location"] ?? "S",
@@ -53,13 +58,13 @@ app.post(
                 FirstPublishLocationId: !contentDocumentId ? firstPublishLocationId : null,
                 ContentDocumentId: contentDocumentId || null
             };
-
+            console.time('UpstreamUpload');
             const response = await saveFileWithSessionKey({
                 sessionKey: req.headers["x-session-key"],
                 namespace: req.headers["x-namespace"],
                 record
             });
-
+            console.timeEnd('UpstreamUpload');
             return res.status(200).json({
                 success: true,
                 responseObject: response
@@ -68,6 +73,8 @@ app.post(
             console.warn('❌ POST RAW failed', err);
             const errMessage = err?.response?.data?.error_description || err?.message;
             return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
+        } finally {
+            console.timeEnd('TotalRequest');
         }
     }
 );
