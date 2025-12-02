@@ -5,13 +5,13 @@ import axios from 'axios';
 const API_VER = 'v62.0';
 
 export async function getFileWithSessionKey({ sessionKey, contentVersionId }) {
-    console.info(`getFileWithSessionKey [${contentVersionId}]`)
+    console.info(`Get file with Session Key [${contentVersionId}]`)
     const auth = await authorize({ sessionKey });
     return await getFile({ auth, contentVersionId });
 }
 
 export async function getFileWithSessionId({ contentVersionId, endpoint, sid }) {
-    console.info(`getFileWithSessionId [${contentVersionId}]`, {
+    console.info(`Get file with Session Id [${contentVersionId}]`, {
         contentVersionId, endpoint, sid
     })
     const sessionId = decrypt(sid);
@@ -24,6 +24,7 @@ export async function getFileWithSessionId({ contentVersionId, endpoint, sid }) 
 }
 
 async function getFile({ auth, contentVersionId }) {
+    const getFileStart = new Date().getTime();
     const url = `${auth.instanceUrl}/services/data/${API_VER}/sobjects/ContentVersion/${contentVersionId}/VersionData`;
     return await axios.get(
         url,
@@ -34,7 +35,7 @@ async function getFile({ auth, contentVersionId }) {
             }
         }
     ).then(response => {
-        console.info(`✅ Retreived File [${contentVersionId}] successfully`);
+        console.info(`✅ Retreived File [${contentVersionId}] successfully in ${new Date().getTime() - getFileStart}ms`);
         return Buffer.from(response.data).toString("base64");
     }).catch(err => {
         console.error("Failed to fetch file from Salesforce", {

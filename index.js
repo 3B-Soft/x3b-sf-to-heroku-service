@@ -25,6 +25,7 @@ app.route('/health').get(async function (req, res) {
  */
 app.route('/v1/file').get(async function (req, res) {
     try {
+
         const { contentVersionId, endpoint, sid, sessionKey } = req.query;
         if (!!contentVersionId && !!sessionKey) {
             const base64 = await getFileWithSessionKey({ sessionKey, contentVersionId });
@@ -42,6 +43,7 @@ app.route('/v1/file').get(async function (req, res) {
             throw new Error('Missing required parameters');
         }
     } catch (err) {
+        console.warn('❌ GET failed', err);
         const errMessage = err?.response?.data?.error_description || err?.message;
         return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
     }
@@ -77,17 +79,18 @@ app.route('/v1/rawFile').post(express.raw({ type: "*/*", limit: "50mb" }), async
             FirstPublishLocationId: !contentDocumentId ? firstPublishLocationId : null,
             ContentDocumentId: contentDocumentId || null
         };
-
         const response = await saveFileWithSessionKey({
             sessionKey: req.headers["x-session-key"],
             namespace: req.headers["x-namespace"],
             record
         });
+
         return res.status(200).json({
             success: true,
             responseObject: response
         });
     } catch (err) {
+        console.warn('❌ POST RAW failed', err);
         const errMessage = err?.response?.data?.error_description || err?.message;
         return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
     }
@@ -114,6 +117,7 @@ app.route('/v1/file').post(express.json({ limit: "50mb" }), async function (req,
             });
         }
     } catch (err) {
+        console.warn('❌ POST JSON failed', err);
         const errMessage = err?.response?.data?.error_description || err?.message;
         return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
     }

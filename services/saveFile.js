@@ -5,7 +5,7 @@ import axios from 'axios';
 const API_VER = 'v62.0';
 
 export async function saveFileWithSessionKey({ sessionKey, namespace, record }) {
-    console.info(`saveFileWithSessionKey [${sessionKey} - ${namespace} - ${record?.Title}]`);
+    console.info(`Save file with Session Key [${sessionKey} - ${namespace} - ${record?.Title}]`);
     const auth = await authorize({ sessionKey });
     return await saveFile({
         auth,
@@ -15,7 +15,7 @@ export async function saveFileWithSessionKey({ sessionKey, namespace, record }) 
 }
 
 export async function saveFileWithSessionId({ sid, endpoint, namespace, record }) {
-    console.info(`saveFileWithSessionKey [${sid} - ${namespace} - ${record?.Title}]`);
+    console.info(`Save file with Session Id [${sid} - ${namespace} - ${record?.Title}]`);
     const sessionId = decrypt(sid);
     return await saveFile({
         auth: {
@@ -28,6 +28,7 @@ export async function saveFileWithSessionId({ sid, endpoint, namespace, record }
 }
 
 async function saveFile({ auth, namespace, record }) {
+    const saveFileStart = new Date().getTime();
     const url = `${auth.instanceUrl}/services/data/${API_VER}/sobjects/ContentVersion`;
     return await axios.post(
         url,
@@ -38,10 +39,9 @@ async function saveFile({ auth, namespace, record }) {
             }
         }
     ).then(async response => {
-        console.info(`✅ Saved file [${response?.data?.id}] successfully`);
+        console.info(`✅ Saved file [${response?.data?.id}] successfully ${new Date().getTime() - saveFileStart}ms`);
         if (record.FirstPublishLocationId) {
             await shareFile({ auth, namespace, contentVersionId: response?.data?.id, linkedEntityId: record.FirstPublishLocationId });
-            console.info(`✅ Shared file [${response?.data?.id} - ${record?.FirstPublishLocationId}] successfully`);
         }
         return {
             success: true,
@@ -62,7 +62,8 @@ async function saveFile({ auth, namespace, record }) {
 }
 
 async function shareFile({ auth, namespace, contentVersionId, linkedEntityId }) {
-    return await axios.post(
+    const shareStart = new Date().getTime();
+    await axios.post(
         `${auth.instanceUrl}/services/apexrest/${namespace}/GlobalRemotingRouter/`,
         {
             controllerName: `${namespace}.Shared`,
@@ -75,5 +76,7 @@ async function shareFile({ auth, namespace, contentVersionId, linkedEntityId }) 
                 'Authorization': `Bearer ${auth.sessionId}`
             }
         }
-    );
+    ).then(() => {
+        console.info(`✅ Shared file [${contentVersionId} - ${linkedEntityId}] successfully in  ${new Date().getTime() - shareStart}ms`);
+    });
 }
