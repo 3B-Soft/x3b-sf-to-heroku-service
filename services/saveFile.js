@@ -1,8 +1,9 @@
 import authorize from './authorize.js';
 import { decrypt } from '../utils/decryption.js';
 import axios from 'axios';
+import FormData from 'form-data';
+export const API_VER = 'v62.0';
 
-const API_VER = 'v62.0';
 
 export async function saveFileWithSessionKey({ sessionKey, namespace, record }) {
     console.info(`Save file with Session Key [${sessionKey} - ${namespace} - ${record?.Title}]`);
@@ -27,6 +28,58 @@ export async function saveFileWithSessionId({ sid, endpoint, namespace, record }
         namespace,
         record
     });
+}
+
+export async function saveStreamedFile({ namespace, sessionKey, contentVersionRecord, uploadedFile }) {
+    const saveFileStart = new Date().getTime();
+    // 1. Construct the multipart/form-data body for Salesforce
+    const form = new FormData();
+
+    // Required part 1: JSON metadata, named 'json'
+    form.append('json', JSON.stringify(contentVersionRecord), { contentType: 'application/json' });
+
+    // Required part 2: File buffer, named 'VersionData'
+    // We append the buffered data (which FormData handles easily)
+    form.append('VersionData', uploadedFile.fileBuffer, {
+        filename: uploadedFile.filename,
+        contentType: uploadedFile.mimetype,
+    });
+
+    const auth = await authorize({ sessionKey: sessionKey });
+    const url = `${auth.instanceUrl}/services/data/${API_VER}/sobjects/ContentVersion`;
+
+    try {
+        // 3. Send the synchronous request to Salesforce
+        const sfResponse = await axios.post(url, form, {
+            headers: {
+                ...form.getHeaders(), // Important: includes the boundary header
+                'Authorization': `Bearer ${auth.sessionId}`,
+                'Accept': 'application/json',
+            },
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+        });
+
+        console.info(`✅ Saved file [${sfResponse.data?.id}] successfully in ${new Date().getTime() - saveFileStart}ms`);
+
+        if (contentVersionRecord.FirstPublishLocationId) {
+            await shareFile({ auth, namespace, contentVersionId: sfResponse.data?.id, linkedEntityId: contentVersionRecord.FirstPublishLocationId });
+        }
+
+        //File was created
+        return sfResponse.data;
+
+    } catch (error) {
+        console.error("Failed to save file to Salesforce", {
+            url,
+            status: err?.response?.status,
+            statusText: err?.response?.statusText,
+            sfError: err?.response?.data,
+            message: err.message,
+            stack: err.stack
+        });
+        throw new Error(`Failed to save file: ${err.message} (${err?.response?.statusText})`);
+    }
 }
 
 async function saveFile({ auth, namespace, record }) {
