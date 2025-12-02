@@ -1,28 +1,17 @@
 import express from "express";
 import cors from "cors";
-import path from "path";
-
-import { fileURLToPath } from "url";
 import { getFileWithSessionKey, getFileWithSessionId } from './services/getFile.js';
-import { saveFileWithSessionKey, saveFileWithSessionId } from './services/saveFile.js';
+import { saveFileWithSessionKey } from './services/saveFile.js';
 
 
 const app = express();
 const port = process.env.PORT || 3000;
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 app.use(
     cors({
         origin: "*",
     })
 );
-// parse request body as JSON
-app.use(express.json({ limit: "50mb" }));
-// add access to directory
-app.use(express.static(__dirname));
-
 
 app.route('/health').get(async function (req, res) {
     return res.status(200).json({
@@ -61,50 +50,49 @@ app.route('/v1/file').get(async function (req, res) {
 /**
  * Create salesforce file synchronously
  */
-app.route('/v1/file').post(async function (req, res) {
-    const { namespace, record, endpoint, sid, sessionKey } = req.body;
+app.route('/v1/file').post(express.raw({ type: "*/*", limit: "50mb" }), async function (req, res) {
     try {
-        if (!namespace || !record || (!sid && !sessionKey)) {
-            throw new Error('Required parameters are missing');
+        const firstPublishLocationId = req.headers["x-first-publish-location-id"];
+        const contentDocumentId = req.headers['x-content-document-id'];
+
+        if (!req.headers["x-namespace"] || !req.headers["x-session-key"] || !req.headers["x-title"]) {
+            throw new Error('Missing required headers. Provide: x-namespace, x-session-key and x-title')
         }
 
-        if (!!sessionKey) {
-            const response = await saveFileWithSessionKey({ sessionKey, namespace, record });
-            return res.status(200).json({
-                success: true,
-                responseObject: response
-            });
-        } else {
-            const response = await saveFileWithSessionId({ sid, endpoint, namespace, record });
-            return res.status(200).json({
-                success: true,
-                responseObject: response
-            });
+        if (!firstPublishLocationId && !contentDocumentId) {
+            throw new Error('Missing required headers. Provide:  x-first-publish-location-id or x-content-document-id')
         }
+
+        if (!req.body) {
+            throw new Error('Missing body for request. Expected content type is application/octet-stream');
+        }
+
+        // Build record for Salesforce ContentVersion
+        const record = {
+            VersionData: req.body.toString("base64"),
+            Title: req.headers["x-title"] ?? "unknown_file_name",
+            PathOnClient: req.headers["x-title"] ?? "unknown_file_name",
+            ContentLocation: req.headers["x-content-location"] ?? "S",
+            Origin: req.headers["x-origin"] ?? "C",
+            FirstPublishLocationId: !contentDocumentId ? firstPublishLocationId : null,
+            ContentDocumentId: contentDocumentId || null
+        };
+
+        const response = await saveFileWithSessionKey({
+            sessionKey: req.headers["x-session-key"],
+            namespace: req.headers["x-namespace"],
+            record
+        });
+        return res.status(200).json({
+            success: true,
+            responseObject: response
+        });
     } catch (err) {
         const errMessage = err?.response?.data?.error_description || err?.message;
         return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
     }
 });
 
-app.route('/v1/file-async').post(async function (req, res) {
-    const { namespace, record, sessionKey } = req.body;
-    try {
-        if (!namespace || !record || !sessionKey) {
-            throw new Error('Required parameters are missing');
-        }
-
-        res.status(202).json({
-            success: true,
-            message: "File upload scheduled"
-        });
-
-        saveFileWithSessionKey({ sessionKey, namespace, record });
-    } catch (err) {
-        const errMessage = err?.response?.data?.error_description || err?.message;
-        return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
-    }
-})
 
 //Start the server
 const server = app.listen(process.env.PORT || port, function () {
