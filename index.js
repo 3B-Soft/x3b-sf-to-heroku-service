@@ -50,52 +50,8 @@ app.route('/v1/file').get(async function (req, res) {
 });
 
 /**
- * Create salesforce file synchronously
+ * Save file with JSON body - to deprecate
  */
-app.route('/v1/rawFile').post(express.raw({ type: "*/*", limit: "50mb" }), async function (req, res) {
-    try {
-        const firstPublishLocationId = req.headers["x-first-publish-location-id"];
-        const contentDocumentId = req.headers['x-content-document-id'];
-
-        if (!req.headers["x-namespace"] || !req.headers["x-session-key"] || !req.headers["x-title"]) {
-            throw new Error('Missing required headers. Provide: x-namespace, x-session-key and x-title')
-        }
-
-        if (!firstPublishLocationId && !contentDocumentId) {
-            throw new Error('Missing required headers. Provide:  x-first-publish-location-id or x-content-document-id')
-        }
-
-        if (!req.body) {
-            throw new Error('Missing body for request. Expected content type is application/octet-stream');
-        }
-
-        // Build record for Salesforce ContentVersion
-        const record = {
-            VersionData: req.body.toString("base64"),
-            Title: req.headers["x-title"] ?? "unknown_file_name",
-            PathOnClient: req.headers["x-title"] ?? "unknown_file_name",
-            ContentLocation: req.headers["x-content-location"] ?? "S",
-            Origin: req.headers["x-origin"] ?? "C",
-            FirstPublishLocationId: !contentDocumentId ? firstPublishLocationId : null,
-            ContentDocumentId: contentDocumentId || null
-        };
-        const response = await saveFileWithSessionKey({
-            sessionKey: req.headers["x-session-key"],
-            namespace: req.headers["x-namespace"],
-            record
-        });
-
-        return res.status(200).json({
-            success: true,
-            responseObject: response
-        });
-    } catch (err) {
-        console.warn('❌ POST RAW failed', err);
-        const errMessage = err?.response?.data?.error_description || err?.message;
-        return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
-    }
-});
-
 app.route('/v1/file').post(express.json({ limit: "50mb" }), async function (req, res) {
     try {
         const { namespace, record, endpoint, sid, sessionKey } = req.body;
@@ -122,6 +78,112 @@ app.route('/v1/file').post(express.json({ limit: "50mb" }), async function (req,
         return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
     }
 });
+
+/**
+ * Create salesforce file synchronously
+ */
+app.post("/v1/rawFile", async (req, res) => {
+    const requestStart = new Date().getTime();
+    try {
+        if (!req.headers["x-namespace"] || !req.headers["x-session-key"] || !req.headers["x-title"]) {
+            throw new Error('Missing required headers. Provide: x-namespace, x-session-key and x-title')
+        }
+
+        if (!req.headers["x-first-publish-location-id"] && !req.headers["x-content-document-id"]) {
+            throw new Error('Missing required headers. Provide:  x-first-publish-location-id or x-content-document-id')
+        }
+
+    } catch (err) {
+        console.warn('❌ POST RAW rejected', err);
+        return res.status(500).json({ success: false, message: err?.message ?? "Unknown error occurred" });
+    }
+
+    const chunks = [];
+    req.on("data", chunk => chunks.push(chunk));
+    req.on("end", async () => {
+        try {
+            console.log(`🔗 Raw file uploaded to Heroku in ${new Date().getTime() - requestStart}ms`);
+            const body = Buffer.concat(chunks);
+            const firstPublishLocationId = req.headers["x-first-publish-location-id"];
+            const contentDocumentId = req.headers['x-content-document-id'];
+
+            const record = {
+                VersionData: body.toString("base64"),
+                Title: req.headers["x-title"] ?? "unknown_file_name",
+                PathOnClient: req.headers["x-title"] ?? "unknown_file_name",
+                ContentLocation: req.headers["x-content-location"] ?? "S",
+                Origin: req.headers["x-origin"] ?? "C",
+                FirstPublishLocationId: !contentDocumentId ? firstPublishLocationId : null,
+                ContentDocumentId: contentDocumentId || null
+            };
+
+            const response = await saveFileWithSessionKey({
+                sessionKey: req.headers["x-session-key"],
+                namespace: req.headers["x-namespace"],
+                record
+            });
+
+            return res.status(200).json({
+                success: true,
+                responseObject: response
+            });
+
+        } catch (err) {
+            console.warn('❌ POST RAW failed', err);
+            const errMessage = err?.response?.data?.error_description || err?.message;
+            return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
+        }
+    });
+});
+
+// app.route('/v1/rawFile').post(express.raw({ type: "*/*", limit: "50mb" }), async function (req, res) {
+//     try {
+//         const firstPublishLocationId = req.headers["x-first-publish-location-id"];
+//         const contentDocumentId = req.headers['x-content-document-id'];
+
+//         if (!req.headers["x-namespace"] || !req.headers["x-session-key"] || !req.headers["x-title"]) {
+//             throw new Error('Missing required headers. Provide: x-namespace, x-session-key and x-title')
+//         }
+
+//         if (!firstPublishLocationId && !contentDocumentId) {
+//             throw new Error('Missing required headers. Provide:  x-first-publish-location-id or x-content-document-id')
+//         }
+
+//         if (!req.body) {
+//             throw new Error('Missing body for request. Expected content type is application/octet-stream');
+//         }
+//         // Build record for Salesforce ContentVersion
+//         const record = {
+//             VersionData: req.body.toString("base64"),
+//             Title: req.headers["x-title"] ?? "unknown_file_name",
+//             PathOnClient: req.headers["x-title"] ?? "unknown_file_name",
+//             ContentLocation: req.headers["x-content-location"] ?? "S",
+//             Origin: req.headers["x-origin"] ?? "C",
+//             FirstPublishLocationId: !contentDocumentId ? firstPublishLocationId : null,
+//             ContentDocumentId: contentDocumentId || null
+//         };
+//         const response = await saveFileWithSessionKey({
+//             sessionKey: req.headers["x-session-key"],
+//             namespace: req.headers["x-namespace"],
+//             record
+//         });
+
+//         return res.status(200).json({
+//             success: true,
+//             responseObject: response
+//         });
+//         return res.status(200).json({
+//             success: true,
+//             responseObject: ''
+//         });
+//     } catch (err) {
+//         console.warn('❌ POST RAW failed', err);
+//         const errMessage = err?.response?.data?.error_description || err?.message;
+//         return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
+//     }
+// });
+
+
 
 
 
