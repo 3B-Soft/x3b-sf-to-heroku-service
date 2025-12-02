@@ -24,10 +24,15 @@ app.route('/health').get(async function (req, res) {
 
 app.post(
     '/v1/rawFile',
-    express.raw({ type: "*/*", limit: "200mb" }),
+    express.text({ type: "text/*", limit: "300mb" }),
     async (req, res) => {
         console.time('TotalRequest');
         try {
+            if (!req.body || typeof req.body !== 'string') {
+                throw new Error("Missing Base64 body string");
+            }
+
+
             if (!req.headers["x-namespace"] || !req.headers["x-session-key"] || !req.headers["x-title"]) {
                 throw new Error('Missing required headers. Provide: x-namespace, x-session-key and x-title')
             }
@@ -36,21 +41,13 @@ app.post(
                 throw new Error('Missing required headers. Provide:  x-first-publish-location-id or x-content-document-id')
             }
 
-            if (!req.body) {
-                throw new Error("Missing binary body");
-            }
-
-            console.log(`🔗 Raw text body uploaded to Heroku `);
+            console.log(`🔗 Raw text body uploaded to Heroku`);
 
             const firstPublishLocationId = req.headers["x-first-publish-location-id"];
             const contentDocumentId = req.headers['x-content-document-id'];
 
-            console.time('Base64Conversion');
-            const base64Data = req.body.toString('base64');
-            console.timeEnd('Base64Conversion');
-
             const record = {
-                VersionData: base64Data,
+                VersionData: req.body,
                 Title: req.headers["x-title"] ?? "unknown_file_name",
                 PathOnClient: req.headers["x-title"] ?? "unknown_file_name",
                 ContentLocation: req.headers["x-content-location"] ?? "S",
@@ -58,6 +55,7 @@ app.post(
                 FirstPublishLocationId: !contentDocumentId ? firstPublishLocationId : null,
                 ContentDocumentId: contentDocumentId || null
             };
+
             console.time('UpstreamUpload');
             const response = await saveFileWithSessionKey({
                 sessionKey: req.headers["x-session-key"],
@@ -65,11 +63,12 @@ app.post(
                 record
             });
             console.timeEnd('UpstreamUpload');
+
             return res.status(200).json({
                 success: true,
                 responseObject: response
             });
-        } catch (e) {
+        } catch (err) {
             console.warn('❌ POST RAW failed', err);
             const errMessage = err?.response?.data?.error_description || err?.message;
             return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
