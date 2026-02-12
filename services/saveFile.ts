@@ -1,14 +1,70 @@
 import authorize from './authorize.js';
 import { decrypt } from '../utils/decryption.js';
-import axios from 'axios';
+import axios, { AxiosResponse } from 'axios';
 import FormData from 'form-data';
 export const API_VER = 'v62.0';
 
+interface Auth {
+    sessionId?: string;
+    instanceUrl: string;
+}
 
-export async function saveFileWithSessionKey({ sessionKey, namespace, record }) {
+interface SaveFileWithSessionKeyParams {
+    sessionKey: string;
+    namespace: string;
+    record: any;
+}
+
+interface SaveFileWithSessionIdParams {
+    sid: string;
+    endpoint: string;
+    namespace: string;
+    record: any;
+}
+
+interface UploadedFile {
+    fileBuffer: Buffer;
+    filename: string;
+    mimetype: string;
+}
+
+interface SaveStreamedFileParams {
+    namespace: string;
+    sessionKey: string;
+    contentVersionRecord: any;
+    uploadedFile: UploadedFile;
+}
+
+interface SaveFileParams {
+    auth: Auth;
+    namespace: string;
+    record: any;
+}
+
+interface ShareFileParams {
+    auth: Auth;
+    namespace: string;
+    contentVersionId: string;
+    linkedEntityId: string;
+}
+
+type SaveFileResponse = {
+    success: boolean;
+    id: string;
+    [key: string]: any;
+};
+
+export interface SaveStreamedFileResult {
+    success: boolean;
+    message?: string;
+    uploadedFile?: UploadedFile;
+}
+
+
+export async function saveFileWithSessionKey({ sessionKey, namespace, record }: SaveFileWithSessionKeyParams): Promise<SaveFileResponse> {
     console.info(`Save file with Session Key [${sessionKey} - ${namespace} - ${record?.Title}]`);
     console.time('Authorization');
-    const auth = await authorize({ sessionKey });
+    const auth: Auth = await authorize({ sessionKey });
     console.timeEnd('Authorization');
     return await saveFile({
         auth,
@@ -17,12 +73,13 @@ export async function saveFileWithSessionKey({ sessionKey, namespace, record }) 
     });
 }
 
-export async function saveFileWithSessionId({ sid, endpoint, namespace, record }) {
+export async function saveFileWithSessionId({ sid, endpoint, namespace, record }: SaveFileWithSessionIdParams): Promise<SaveFileResponse> {
     console.info(`Save file with Session Id [${sid} - ${namespace} - ${record?.Title}]`);
-    const sessionId = decrypt(sid);
+    const sessionId = decrypt(sid) ?? undefined;
+
     return await saveFile({
         auth: {
-            sessionId,
+            ...(sessionId ? { sessionId } : {}),
             instanceUrl: endpoint
         },
         namespace,
@@ -30,7 +87,7 @@ export async function saveFileWithSessionId({ sid, endpoint, namespace, record }
     });
 }
 
-export async function saveStreamedFile({ namespace, sessionKey, contentVersionRecord, uploadedFile }) {
+export async function saveStreamedFile({ namespace, sessionKey, contentVersionRecord, uploadedFile }: SaveStreamedFileParams): Promise<unknown> {
     const saveFileStart = new Date().getTime();
     // 1. Construct the multipart/form-data body for Salesforce
     const form = new FormData();
@@ -45,12 +102,12 @@ export async function saveStreamedFile({ namespace, sessionKey, contentVersionRe
         contentType: uploadedFile.mimetype,
     });
 
-    const auth = await authorize({ sessionKey: sessionKey });
+    const auth: Auth = await authorize({ sessionKey: sessionKey });
     const url = `${auth.instanceUrl}/services/data/${API_VER}/sobjects/ContentVersion`;
 
     try {
         // 3. Send the synchronous request to Salesforce
-        const sfResponse = await axios.post(url, form, {
+        const sfResponse: AxiosResponse<any> = await axios.post(url, form, {
             headers: {
                 ...form.getHeaders(), // Important: includes the boundary header
                 'Authorization': `Bearer ${auth.sessionId}`,
@@ -69,7 +126,7 @@ export async function saveStreamedFile({ namespace, sessionKey, contentVersionRe
         //File was created
         return sfResponse.data;
 
-    } catch (error) {
+    } catch (err: any) {
         console.error("Failed to save file to Salesforce", {
             url,
             status: err?.response?.status,
@@ -82,7 +139,7 @@ export async function saveStreamedFile({ namespace, sessionKey, contentVersionRe
     }
 }
 
-async function saveFile({ auth, namespace, record }) {
+async function saveFile({ auth, namespace, record }: SaveFileParams): Promise<SaveFileResponse> {
     const saveFileStart = new Date().getTime();
     const url = `${auth.instanceUrl}/services/data/${API_VER}/sobjects/ContentVersion`;
     return await axios.post(
@@ -103,8 +160,8 @@ async function saveFile({ auth, namespace, record }) {
             id: response.data.id,
             ...response.data
         }
-    }).catch(err => {
-        console.error("Failed to save file to Salesforce", {
+    }).catch((err: any) => {
+        console.error('Failed to save file to Salesforce', {
             url,
             status: err?.response?.status,
             statusText: err?.response?.statusText,
@@ -116,7 +173,7 @@ async function saveFile({ auth, namespace, record }) {
     });
 }
 
-async function shareFile({ auth, namespace, contentVersionId, linkedEntityId }) {
+async function shareFile({ auth, namespace, contentVersionId, linkedEntityId }: ShareFileParams): Promise<void> {
     const shareStart = new Date().getTime();
     await axios.post(
         `${auth.instanceUrl}/services/apexrest/${namespace}/GlobalRemotingRouter/`,

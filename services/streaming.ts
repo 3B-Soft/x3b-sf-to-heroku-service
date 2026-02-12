@@ -1,6 +1,15 @@
+// @ts-ignore
 import Busboy from 'busboy'; // Direct import usually works for default exports
+import { Request, Response, NextFunction } from 'express';
 
-export const streamFileUpload = (req, res, next) => {
+export interface UploadedFile {
+    fileBuffer: Buffer;
+    filename: string;
+    mimetype: string;
+    encoding: string;
+}
+
+export const streamFileUpload = (req: Request, res: Response, next: NextFunction): Response | void => {
     console.time('streamFileUpload');
     const contentType = req.headers['content-type'];
     if (!contentType || !contentType.startsWith('multipart/form-data')) {
@@ -10,19 +19,20 @@ export const streamFileUpload = (req, res, next) => {
     // Initialize Busboy with request headers
     const busboy = Busboy({ headers: req.headers });
     req.files = {}; // Object to hold file buffers and info
+    const files = req.files;
 
-    busboy.on('file', (fieldname, file, filename, encoding, mimetype) => {
+    busboy.on('file', (fieldname: string, file: NodeJS.ReadableStream, filename: any, encoding: string, mimetype: string) => {
         let fileBuffer = Buffer.alloc(0);
 
         // 1. Consume the file stream and buffer it in memory (FIX for the hang)
-        file.on('data', (data) => {
+        file.on('data', (data: Buffer) => {
             fileBuffer = Buffer.concat([fileBuffer, data]);
         });
 
         // 2. Store the file buffer and metadata upon completion
         file.on('end', () => {
             console.log(`[Busboy] File stream ended for ${fieldname}. Size: ${fileBuffer.length} bytes.`);
-            req.files[fieldname] = {
+            files[fieldname] = {
                 fileBuffer: fileBuffer, // Pass the buffer instead of the stream
                 filename: filename.filename,
                 mimetype: mimetype,
@@ -31,7 +41,7 @@ export const streamFileUpload = (req, res, next) => {
         });
 
         // Handle stream errors
-        file.on('error', (err) => {
+        file.on('error', (err: Error) => {
             console.timeEnd('streamFileUpload');
             console.error('[Busboy] File stream Error:', err);
             // It's crucial to stop processing on error
@@ -40,7 +50,7 @@ export const streamFileUpload = (req, res, next) => {
         });
     });
 
-    busboy.on('field', (fieldname, val) => {
+    busboy.on('field', (fieldname: string, val: string) => {
         // MUST consume non-file fields to ensure 'finish' fires
         // If you need text fields, you would store them on req.body here
         console.log(`[Busboy] Consumed field: ${fieldname}`);
@@ -52,7 +62,7 @@ export const streamFileUpload = (req, res, next) => {
         next(); // Proceed to the route handler
     });
 
-    busboy.on('error', (err) => {
+    busboy.on('error', (err: Error) => {
         console.timeEnd('streamFileUpload');
         console.error('[Busboy] Busboy Error:', err);
         return res.status(500).json({ success: false, message: 'File upload parsing error' });

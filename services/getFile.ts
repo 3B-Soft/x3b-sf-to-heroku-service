@@ -1,10 +1,38 @@
 import authorize from './authorize.js';
 import { decrypt } from '../utils/decryption.js';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
+import { Readable } from 'stream';
 
 const API_VER = 'v62.0';
 
-export async function getStreamedFile({ sessionKey, contentVersionId }) {
+type Auth = {
+    sessionId: string | null;
+    instanceUrl: string;
+    expiresIn?: number;
+};
+
+type GetStreamedFileParams = {
+    sessionKey: string;
+    contentVersionId: string;
+};
+
+type GetFileWithSessionKeyParams = {
+    sessionKey: string;
+    contentVersionId: string;
+};
+
+type GetFileWithSessionIdParams = {
+    contentVersionId: string;
+    endpoint: string;
+    sid: string;
+};
+
+type GetFileParams = {
+    auth: Auth;
+    contentVersionId: string;
+};
+
+export async function getStreamedFile({ sessionKey, contentVersionId }: GetStreamedFileParams): Promise<Readable> {
     const getFileStart = new Date().getTime();
     const auth = await authorize({ sessionKey: sessionKey });
     // const auth = {
@@ -13,7 +41,7 @@ export async function getStreamedFile({ sessionKey, contentVersionId }) {
     //     "expiresIn": 2390
     // }
     const url = `${auth.instanceUrl}/services/data/${API_VER}/sobjects/ContentVersion/${contentVersionId}/VersionData`;
-    return await axios.get(
+    return await axios.get<Readable>(
         url,
         {
             responseType: "stream",
@@ -24,26 +52,27 @@ export async function getStreamedFile({ sessionKey, contentVersionId }) {
     ).then(response => {
         console.info(`✅ Retreived File [${contentVersionId}] successfully in ${new Date().getTime() - getFileStart}ms`, response);
         return response.data;
-    }).catch(err => {
+    }).catch((err: unknown) => {
+        const error = err as AxiosError;
         console.error("Failed to fetch file from Salesforce", {
             url,
-            status: err?.response?.status,
-            statusText: err?.response?.statusText,
-            sfError: err?.response?.data,
-            message: err.message,
-            stack: err.stack
+            status: error?.response?.status,
+            statusText: error?.response?.statusText,
+            sfError: error?.response?.data,
+            message: error.message,
+            stack: error.stack
         });
-        throw new Error(`Failed to fetch file: ${err.message} (${err?.response?.statusText})`);
+        throw new Error(`Failed to fetch file: ${error.message} (${error?.response?.statusText})`);
     });
 }
 
-export async function getFileWithSessionKey({ sessionKey, contentVersionId }) {
+export async function getFileWithSessionKey({ sessionKey, contentVersionId }: GetFileWithSessionKeyParams): Promise<string> {
     console.info(`Get file with Session Key [${contentVersionId}]`)
     const auth = await authorize({ sessionKey });
     return await getFile({ auth, contentVersionId });
 }
 
-export async function getFileWithSessionId({ contentVersionId, endpoint, sid }) {
+export async function getFileWithSessionId({ contentVersionId, endpoint, sid }: GetFileWithSessionIdParams): Promise<string> {
     console.info(`Get file with Session Id [${contentVersionId}]`, {
         contentVersionId, endpoint, sid
     })
@@ -56,10 +85,10 @@ export async function getFileWithSessionId({ contentVersionId, endpoint, sid }) 
     });
 }
 
-async function getFile({ auth, contentVersionId }) {
+async function getFile({ auth, contentVersionId }: GetFileParams): Promise<string> {
     const getFileStart = new Date().getTime();
     const url = `${auth.instanceUrl}/services/data/${API_VER}/sobjects/ContentVersion/${contentVersionId}/VersionData`;
-    return await axios.get(
+    return await axios.get<ArrayBuffer>(
         url,
         {
             responseType: "arraybuffer",
@@ -70,15 +99,16 @@ async function getFile({ auth, contentVersionId }) {
     ).then(response => {
         console.info(`✅ Retreived File [${contentVersionId}] successfully in ${new Date().getTime() - getFileStart}ms`);
         return Buffer.from(response.data).toString("base64");
-    }).catch(err => {
+    }).catch((err: unknown) => {
+        const error = err as AxiosError;
         console.error("Failed to fetch file from Salesforce", {
             url,
-            status: err?.response?.status,
-            statusText: err?.response?.statusText,
-            sfError: err?.response?.data,
-            message: err.message,
-            stack: err.stack
+            status: error?.response?.status,
+            statusText: error?.response?.statusText,
+            sfError: error?.response?.data,
+            message: error.message,
+            stack: error.stack
         });
-        throw new Error(`Failed to fetch file: ${err.message} (${err?.response?.statusText})`);
+        throw new Error(`Failed to fetch file: ${error.message} (${error?.response?.statusText})`);
     });
 }
