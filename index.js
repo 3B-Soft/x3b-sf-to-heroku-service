@@ -4,15 +4,21 @@ import { streamFileUpload } from './services/streaming.js';
 
 import { getStreamedFile, getFileWithSessionKey, getFileWithSessionId } from './services/getFile.js';
 import { saveStreamedFile, saveFileWithSessionKey, saveFileWithSessionId } from './services/saveFile.js';
+import { createLogger } from './observability/client.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Observability — ships request logs + heartbeats to the central log service.
+const logger = createLogger({ service: 'x3b-sf-to-heroku', kind: 'web' });
 
 app.use(
     cors({
         origin: "*",
     })
 );
+// log every request (memory-safe, fire-and-forget)
+app.use(logger.middleware);
 
 app.route('/health').get(async function (req, res) {
     return res.status(200).json({
