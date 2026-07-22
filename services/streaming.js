@@ -55,7 +55,16 @@ export const streamFileUpload = (req, res, next) => {
     busboy.on('error', (err) => {
         console.timeEnd('streamFileUpload');
         console.error('[Busboy] Busboy Error:', err);
-        return res.status(500).json({ success: false, message: 'File upload parsing error' });
+        if (!res.headersSent) return res.status(500).json({ success: false, message: 'File upload parsing error' });
+    });
+
+    // Client hung up mid-upload: busboy never emits 'finish', so the request would
+    // hang until the router kills it (H28) while the buffered file leaks. Tear down instead.
+    res.on('close', () => {
+        if (!res.writableFinished) {
+            req.unpipe(busboy);
+            busboy.destroy();
+        }
     });
 
     // Pipe the request into Busboy to start parsing

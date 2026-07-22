@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import { pipeline } from "node:stream/promises";
 import { streamFileUpload } from './services/streaming.js';
 
 import { getStreamedFile, getFileWithSessionKey, getFileWithSessionId } from './services/getFile.js';
@@ -111,22 +112,16 @@ app.route('/v1/getFile').get(async function (req, res) {
         res.setHeader('Content-Type', 'application/octet-stream'); // General binary file type
         // res.setHeader('Content-Disposition', `attachment; filename="downloaded_file"`); // Forces download prompt
 
-        // Key Change 4: Pipe the file stream directly to the response stream
-        fileStream.pipe(res);
-
-        // Key Change 5: Handle stream errors and completion
-        fileStream.on('error', (err) => {
-            console.error('Stream error:', err);
-            // Check if headers have already been sent before attempting to send a 500
-            if (!res.headersSent) {
-                return res.status(500).json({ success: false, message: "File stream failed" });
-            }
-        });
-
-        // This is crucial: wait for the response stream to finish piping
-        await new Promise(resolve => fileStream.on('end', resolve));
+        // pipeline() destroys the Salesforce stream if the client disconnects mid-download.
+        // A bare .pipe() keeps pumping into a dead socket → H27 and a leaked upstream connection.
+        await pipeline(fileStream, res);
 
     } catch (err) {
+        // Client hung up mid-download: nothing to report, just make sure the upstream is torn down.
+        if (err?.code === 'ERR_STREAM_PREMATURE_CLOSE' || req.destroyed) {
+            fileStream?.destroy();
+            return;
+        }
         console.warn('❌ GET file', err);
         const errMessage = err?.response?.data?.error_description || err?.message;
         // If an error occurred BEFORE piping (e.g., auth error, initial fetch error)
@@ -206,3 +201,8 @@ const server = app.listen(process.env.PORT || port, function () {
     const port = server.address().port;
     console.log("Great, app is listening at http://%s:%s", host, port);
 });
+
+// Node's 5s default races the Heroku router's connection reuse: the dyno closes a
+// keep-alive socket the router is about to send on → H27. Must exceed the router's 90s.
+server.keepAliveTimeout = 120000;
+server.headersTimeout = 125000;
