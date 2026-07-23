@@ -100,12 +100,19 @@ export function createLogger(opts = {}) {
     /** Express middleware: one sampled request event per response. Errors always kept. */
     function middleware(req, res, next) {
         const start = Date.now();
-        res.on('finish', () => {
+        let logged = false;
+        // aborted=true: client hung up before the response finished ('close' without
+        // 'finish') — these are the requests that surface as router H27/H28, so they
+        // are always kept, never sampled out.
+        const record = (aborted) => {
+            if (logged) return;
+            logged = true;
             try {
                 const isErr = res.statusCode >= 500;
-                const isWarn = res.statusCode >= 400 && res.statusCode < 500;
-                if (!isErr && Math.random() > sampleRate) return;
+                const isWarn = aborted || (res.statusCode >= 400 && res.statusCode < 500);
+                if (!isErr && !aborted && Math.random() > sampleRate) return;
                 const { rssMb, memoryPct } = memSnapshot();
+                const sample = requestSample(req);
                 push({
                     service, dyno, source: kind,
                     level: isErr ? 'error' : isWarn ? 'warn' : 'info',
@@ -117,10 +124,12 @@ export function createLogger(opts = {}) {
                     requestId: req.id || req.headers?.['x-request-id'] || undefined,
                     recordId: req.body?.recordId || req.headers?.['x-content-document-id'] || undefined,
                     memoryRssMb: rssMb, memoryPct,
-                    meta: requestSample(req),
+                    meta: aborted ? { ...(sample || {}), aborted: true } : sample,
                 });
             } catch { /* never break the response */ }
-        });
+        };
+        res.on('finish', () => record(false));
+        res.on('close', () => { if (!res.writableFinished) record(true); });
         next();
     }
 

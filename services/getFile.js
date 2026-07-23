@@ -17,12 +17,15 @@ export async function getStreamedFile({ sessionKey, contentVersionId }) {
         url,
         {
             responseType: "stream",
+            // timeout covers time-to-response-headers for streams; a mid-stream SF stall
+            // is caught by pipeline() when the client gives up
+            timeout: 30000,
             headers: {
                 'Authorization': `Bearer ${auth.sessionId}`
             }
         }
     ).then(response => {
-        console.info(`✅ Retreived File [${contentVersionId}] successfully in ${new Date().getTime() - getFileStart}ms`, response);
+        console.info(`✅ Retreived File [${contentVersionId}] (${response.headers?.['content-length'] ?? '?'} bytes) in ${new Date().getTime() - getFileStart}ms`);
         return response.data;
     }).catch(err => {
         console.error("Failed to fetch file from Salesforce", {
@@ -63,6 +66,7 @@ async function getFile({ auth, contentVersionId }) {
         url,
         {
             responseType: "arraybuffer",
+            timeout: 120000,
             headers: {
                 'Authorization': `Bearer ${auth.sessionId}`
             }

@@ -1,72 +1,76 @@
-import Busboy from 'busboy'; // Direct import usually works for default exports
+import Busboy from 'busboy';
+
+const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB) || 100;
+const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 export const streamFileUpload = (req, res, next) => {
-    console.time('streamFileUpload');
     const contentType = req.headers['content-type'];
     if (!contentType || !contentType.startsWith('multipart/form-data')) {
         return res.status(400).json({ success: false, message: 'Missing or invalid multipart/form-data content type' });
     }
 
-    // Initialize Busboy with request headers
-    const busboy = Busboy({ headers: req.headers });
-    req.files = {}; // Object to hold file buffers and info
+    let busboy;
+    try {
+        busboy = Busboy({ headers: req.headers, limits: { files: 1, fileSize: MAX_FILE_SIZE } });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: `Malformed multipart request: ${err.message}` });
+    }
 
-    busboy.on('file', (fieldname, file, filename, encoding, mimetype) => {
-        let fileBuffer = Buffer.alloc(0);
+    req.files = {};
+    let settled = false;
 
-        // 1. Consume the file stream and buffer it in memory (FIX for the hang)
-        file.on('data', (data) => {
-            fileBuffer = Buffer.concat([fileBuffer, data]);
-        });
+    const fail = (status, message) => {
+        if (settled) return;
+        settled = true;
+        req.unpipe(busboy);
+        busboy.destroy();
+        req.resume(); // drain the rest of the body so the client isn't left hanging
+        if (!res.headersSent) res.status(status).json({ success: false, message });
+    };
 
-        // 2. Store the file buffer and metadata upon completion
+    // busboy 1.x signature: (name, stream, info) — NOT the 0.x positional (name, stream, filename, encoding, mimetype)
+    busboy.on('file', (fieldname, file, info) => {
+        // ponytail: one in-memory copy of the file. True stream-through to Salesforce
+        // needs a known length (e.g. a client-sent x-file-size header) — add when files
+        // outgrow dyno RAM.
+        const chunks = [];
+        file.on('data', (data) => chunks.push(data));
+        file.on('limit', () => fail(413, `File exceeds the ${MAX_FILE_SIZE_MB}MB limit`));
         file.on('end', () => {
-            console.log(`[Busboy] File stream ended for ${fieldname}. Size: ${fileBuffer.length} bytes.`);
+            if (settled) return;
             req.files[fieldname] = {
-                fileBuffer: fileBuffer, // Pass the buffer instead of the stream
-                filename: filename.filename,
-                mimetype: mimetype,
-                encoding: encoding
+                fileBuffer: Buffer.concat(chunks),
+                filename: info.filename,
+                mimetype: info.mimeType,
+                encoding: info.encoding
             };
         });
-
-        // Handle stream errors
         file.on('error', (err) => {
-            console.timeEnd('streamFileUpload');
-            console.error('[Busboy] File stream Error:', err);
-            // It's crucial to stop processing on error
-            req.unpipe(busboy);
-            return res.status(500).json({ success: false, message: 'Error reading uploaded file stream.' });
+            console.error('[Busboy] File stream error:', err);
+            fail(500, 'Error reading uploaded file stream.');
         });
-    });
-
-    busboy.on('field', (fieldname, val) => {
-        // MUST consume non-file fields to ensure 'finish' fires
-        // If you need text fields, you would store them on req.body here
-        console.log(`[Busboy] Consumed field: ${fieldname}`);
     });
 
     busboy.on('finish', () => {
-        console.timeEnd('streamFileUpload');
-        console.log('[Busboy] Finished processing all parts. Calling next().');
-        next(); // Proceed to the route handler
+        if (settled) return;
+        settled = true;
+        next();
     });
 
     busboy.on('error', (err) => {
-        console.timeEnd('streamFileUpload');
-        console.error('[Busboy] Busboy Error:', err);
-        if (!res.headersSent) return res.status(500).json({ success: false, message: 'File upload parsing error' });
+        console.error('[Busboy] Error:', err);
+        fail(500, 'File upload parsing error');
     });
 
     // Client hung up mid-upload: busboy never emits 'finish', so the request would
     // hang until the router kills it (H28) while the buffered file leaks. Tear down instead.
     res.on('close', () => {
         if (!res.writableFinished) {
+            settled = true;
             req.unpipe(busboy);
             busboy.destroy();
         }
     });
 
-    // Pipe the request into Busboy to start parsing
     req.pipe(busboy);
 };

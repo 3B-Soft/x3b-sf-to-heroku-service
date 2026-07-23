@@ -3,6 +3,7 @@ import cors from "cors";
 import { pipeline } from "node:stream/promises";
 import { streamFileUpload } from './services/streaming.js';
 
+import authorize from './services/authorize.js';
 import { getStreamedFile, getFileWithSessionKey, getFileWithSessionId } from './services/getFile.js';
 import { saveStreamedFile, saveFileWithSessionKey, saveFileWithSessionId } from './services/saveFile.js';
 import { createLogger } from './observability/client.js';
@@ -32,18 +33,23 @@ app.route('/health').get(async function (req, res) {
 /**
  * POST to upload a multi-form file
  */
-app.post('/v1/fileUpload', streamFileUpload, async (req, res) => {
-    console.time('fileUpload');
+app.post('/v1/fileUpload', (req, res, next) => {
+    // Validate headers BEFORE parsing the body — no point buffering a file we'll reject.
+    if (!req.headers["x-namespace"] || !req.headers["x-session-key"] || !req.headers["x-title"]) {
+        return res.status(400).json({ success: false, message: 'Missing required headers. Provide: x-namespace, x-session-key and x-title' });
+    }
+    if (!req.headers["x-first-publish-location-id"] && !req.headers["x-content-document-id"]) {
+        return res.status(400).json({ success: false, message: 'Missing required headers. Provide: x-first-publish-location-id or x-content-document-id' });
+    }
+    // Start the auth roundtrip while the upload body is still arriving — it's off the
+    // critical path by the time the file is parsed.
+    req.authPromise = authorize({ sessionKey: req.headers["x-session-key"] });
+    req.authPromise.catch(() => { }); // awaited in the handler; this only prevents an unhandled rejection
+    next();
+}, streamFileUpload, async (req, res) => {
+    const uploadStart = Date.now();
 
     try {
-        if (!req.headers["x-namespace"] || !req.headers["x-session-key"] || !req.headers["x-title"]) {
-            throw new Error('Missing required headers. Provide: x-namespace, x-session-key and x-title')
-        }
-
-        if (!req.headers["x-first-publish-location-id"] && !req.headers["x-content-document-id"]) {
-            throw new Error('Missing required headers. Provide:  x-first-publish-location-id or x-content-document-id')
-        }
-
         // Assuming the file is sent under the field name 'file'
         const uploadedFile = req.files['file'];
         if (!uploadedFile || !uploadedFile.fileBuffer) {
@@ -62,13 +68,15 @@ app.post('/v1/fileUpload', streamFileUpload, async (req, res) => {
         };
 
 
+        const auth = await req.authPromise;
         const response = await saveStreamedFile({
             namespace: req.headers["x-namespace"],
-            sessionKey: req.headers["x-session-key"],
+            auth,
             contentVersionRecord,
             uploadedFile
         });
 
+        console.info(`fileUpload completed in ${Date.now() - uploadStart}ms`);
         return res.status(200).json({
             ...response
         });
@@ -76,13 +84,11 @@ app.post('/v1/fileUpload', streamFileUpload, async (req, res) => {
         console.warn('❌ POST file failed', err);
         const errMessage = err?.response?.data?.error_description || err?.message;
         return res.status(500).json({ success: false, message: errMessage ?? "Unknown error occurred" });
-    } finally {
-        console.timeEnd('fileUpload');
     }
 });
 
 app.route('/v1/getFile').get(async function (req, res) {
-    console.time('fileDownload');
+    const downloadStart = Date.now();
     let fileStream;
     try {
         const { contentVersionId, sessionKey } = req.query;
@@ -130,8 +136,7 @@ app.route('/v1/getFile').get(async function (req, res) {
         }
         // If an error occurred after headers were sent (less common, stream error should be handled above)
     } finally {
-        // Ensure the timeEnd call is outside of the stream logic that waits for 'end'
-        console.timeEnd('fileDownload');
+        console.info(`fileDownload completed in ${Date.now() - downloadStart}ms`);
     }
 })
 

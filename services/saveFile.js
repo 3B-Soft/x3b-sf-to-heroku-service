@@ -30,7 +30,7 @@ export async function saveFileWithSessionId({ sid, endpoint, namespace, record }
     });
 }
 
-export async function saveStreamedFile({ namespace, sessionKey, contentVersionRecord, uploadedFile }) {
+export async function saveStreamedFile({ namespace, auth, contentVersionRecord, uploadedFile }) {
     const saveFileStart = new Date().getTime();
     // 1. Construct the multipart/form-data body for Salesforce
     const form = new FormData();
@@ -42,10 +42,9 @@ export async function saveStreamedFile({ namespace, sessionKey, contentVersionRe
     // We append the buffered data (which FormData handles easily)
     form.append('VersionData', uploadedFile.fileBuffer, {
         filename: uploadedFile.filename,
-        contentType: uploadedFile.mimetype,
+        contentType: uploadedFile.mimetype || 'application/octet-stream',
     });
 
-    const auth = await authorize({ sessionKey: sessionKey });
     const url = `${auth.instanceUrl}/services/data/${API_VER}/sobjects/ContentVersion`;
 
     try {
@@ -56,6 +55,7 @@ export async function saveStreamedFile({ namespace, sessionKey, contentVersionRe
                 'Authorization': `Bearer ${auth.sessionId}`,
                 'Accept': 'application/json',
             },
+            timeout: 600000,
             maxContentLength: Infinity,
             maxBodyLength: Infinity,
         });
@@ -69,7 +69,7 @@ export async function saveStreamedFile({ namespace, sessionKey, contentVersionRe
         //File was created
         return sfResponse.data;
 
-    } catch (error) {
+    } catch (err) {
         console.error("Failed to save file to Salesforce", {
             url,
             status: err?.response?.status,
@@ -89,6 +89,7 @@ async function saveFile({ auth, namespace, record }) {
         url,
         record,
         {
+            timeout: 120000,
             headers: {
                 'Authorization': `Bearer ${auth.sessionId}`
             }
@@ -127,6 +128,7 @@ async function shareFile({ auth, namespace, contentVersionId, linkedEntityId }) 
             linkedEntityId: linkedEntityId
         },
         {
+            timeout: 30000,
             headers: {
                 'Authorization': `Bearer ${auth.sessionId}`
             }
